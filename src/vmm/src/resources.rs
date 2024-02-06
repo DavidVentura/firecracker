@@ -234,6 +234,11 @@ impl VmResources {
         self.vm_config.track_dirty_pages
     }
 
+    /// Returns whether the VM is backed by hugepages.
+    pub fn backed_by_hugepages(&self) -> bool {
+        self.vm_config.backed_by_hugepages
+    }
+
     /// Add a custom CPU template to the VM resources
     /// to configure vCPUs.
     pub fn set_custom_cpu_template(&mut self, cpu_template: CustomCpuTemplate) {

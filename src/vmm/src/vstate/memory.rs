@@ -57,7 +57,7 @@ where
     Self: Sized,
 {
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(mem_size_mib: usize, track_dirty_pages: bool) -> Result<Self, MemoryError>;
+    fn memfd_backed(mem_size_mib: usize, track_dirty_pages: bool, hugepages: bool) -> Result<Self, MemoryError>;
 
     /// Creates a GuestMemoryMmap from raw regions.
     fn from_raw_regions(
@@ -70,6 +70,7 @@ where
         regions: Vec<(FileOffset, GuestAddress, usize)>,
         track_dirty_pages: bool,
         shared: bool,
+        hugepages: bool,
     ) -> Result<Self, MemoryError>;
 
     /// Creates a GuestMemoryMmap given a `file` containing the data
@@ -78,6 +79,7 @@ where
         file: Option<&File>,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
+        hugepages: bool,
     ) -> Result<Self, MemoryError>;
 
     /// Describes GuestMemoryMmap through a GuestMemoryState struct.
@@ -119,7 +121,7 @@ pub struct GuestMemoryState {
 
 impl GuestMemoryExtension for GuestMemoryMmap {
     /// Creates a GuestMemoryMmap with `size` in MiB backed by a memfd.
-    fn memfd_backed(mem_size_mib: usize, track_dirty_pages: bool) -> Result<Self, MemoryError> {
+    fn memfd_backed(mem_size_mib: usize, track_dirty_pages: bool, hugepages: bool) -> Result<Self, MemoryError> {
         let memfd_file = create_memfd(mem_size_mib)?.into_file();
 
         let mut offset: u64 = 0;
@@ -133,7 +135,7 @@ impl GuestMemoryExtension for GuestMemoryMmap {
             })
             .collect::<Result<Vec<_>, MemoryError>>()?;
 
-        Self::from_raw_regions_file(regions, track_dirty_pages, true)
+        Self::from_raw_regions_file(regions, track_dirty_pages, true, hugepages)
     }
 
     /// Creates a GuestMemoryMmap from raw regions backed by anonymous memory.
@@ -168,12 +170,18 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         regions: Vec<(FileOffset, GuestAddress, usize)>,
         track_dirty_pages: bool,
         shared: bool,
+        hugepages: bool,
     ) -> Result<Self, MemoryError> {
         let prot = libc::PROT_READ | libc::PROT_WRITE;
-        let flags = if shared {
-            libc::MAP_NORESERVE | libc::MAP_SHARED
+        let hp_flags = if hugepages {
+            libc::MAP_HUGETLB | libc::MAP_ANONYMOUS
         } else {
-            libc::MAP_NORESERVE | libc::MAP_PRIVATE
+            0
+        };
+        let flags = if shared {
+            libc::MAP_NORESERVE | libc::MAP_SHARED | hp_flags
+        } else {
+            libc::MAP_NORESERVE | libc::MAP_PRIVATE | hp_flags
         };
         let regions = regions
             .into_iter()
@@ -201,6 +209,7 @@ impl GuestMemoryExtension for GuestMemoryMmap {
         file: Option<&File>,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
+        hugepages: bool,
     ) -> Result<Self, MemoryError> {
         match file {
             Some(f) => {
@@ -216,7 +225,7 @@ impl GuestMemoryExtension for GuestMemoryMmap {
                     .collect::<Result<Vec<_>, std::io::Error>>()
                     .map_err(MemoryError::FileError)?;
 
-                Self::from_raw_regions_file(regions, track_dirty_pages, false)
+                Self::from_raw_regions_file(regions, track_dirty_pages, false, hugepages)
             }
             None => {
                 let regions = state
@@ -433,7 +442,7 @@ mod tests {
         // Test that all regions are guarded.
         {
             let guest_memory =
-                GuestMemoryMmap::from_raw_regions_file(regions.clone(), false, false).unwrap();
+                GuestMemoryMmap::from_raw_regions_file(regions.clone(), false, false, false).unwrap();
             guest_memory.iter().for_each(|region| {
                 assert_eq!(region.size(), region_size);
                 assert!(region.file_offset().is_some());
@@ -444,7 +453,7 @@ mod tests {
         // Check dirty page tracking is off.
         {
             let guest_memory =
-                GuestMemoryMmap::from_raw_regions_file(regions.clone(), false, false).unwrap();
+                GuestMemoryMmap::from_raw_regions_file(regions.clone(), false, false, false).unwrap();
             guest_memory.iter().for_each(|region| {
                 assert!(region.bitmap().is_none());
             });
@@ -453,7 +462,7 @@ mod tests {
         // Check dirty page tracking is on.
         {
             let guest_memory =
-                GuestMemoryMmap::from_raw_regions_file(regions, true, false).unwrap();
+                GuestMemoryMmap::from_raw_regions_file(regions, true, false, false).unwrap();
             guest_memory.iter().for_each(|region| {
                 assert!(region.bitmap().is_some());
             });
@@ -629,7 +638,7 @@ mod tests {
         guest_memory.dump(&mut memory_file).unwrap();
 
         let restored_guest_memory =
-            GuestMemoryMmap::from_state(Some(&memory_file), &memory_state, false).unwrap();
+            GuestMemoryMmap::from_state(Some(&memory_file), &memory_state, false, false).unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; page_size * 2];
@@ -686,7 +695,7 @@ mod tests {
 
         // We can restore from this because this is the first dirty dump.
         let restored_guest_memory =
-            GuestMemoryMmap::from_state(Some(&file), &memory_state, false).unwrap();
+            GuestMemoryMmap::from_state(Some(&file), &memory_state, false, false).unwrap();
 
         // Check that the region contents are the same.
         let mut restored_region = vec![0u8; region_size];

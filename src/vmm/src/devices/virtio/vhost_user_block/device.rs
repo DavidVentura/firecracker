@@ -791,7 +791,7 @@ mod tests {
             GuestAddress(0x0),
             region_size,
         )];
-        let guest_memory = GuestMemoryMmap::from_raw_regions_file(regions, false, false).unwrap();
+        let guest_memory = GuestMemoryMmap::from_raw_regions_file(regions, false, false, false).unwrap();
 
         // During actiavion of the device features, memory and queues should be set and activated.
         vhost_block.activate(guest_memory).unwrap();

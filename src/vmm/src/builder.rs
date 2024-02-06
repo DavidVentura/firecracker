@@ -238,7 +238,7 @@ pub fn build_microvm_for_boot(
 
     let track_dirty_pages = vm_resources.track_dirty_pages();
     let guest_memory =
-        GuestMemoryMmap::memfd_backed(vm_resources.vm_config.mem_size_mib, track_dirty_pages)
+        GuestMemoryMmap::memfd_backed(vm_resources.vm_config.mem_size_mib, track_dirty_pages, vm_resources.backed_by_hugepages())
             .map_err(StartMicrovmError::GuestMemory)?;
     let entry_addr = load_kernel(boot_config, &guest_memory)?;
     let initrd = load_initrd_from_config(boot_config, &guest_memory)?;

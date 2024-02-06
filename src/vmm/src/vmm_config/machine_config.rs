@@ -46,6 +46,9 @@ pub struct MachineConfig {
     /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
     #[serde(default)]
     pub track_dirty_pages: bool,
+    /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
+    #[serde(default)]
+    pub backed_by_hugepages: bool,
 }
 
 impl Default for MachineConfig {
@@ -78,6 +81,9 @@ pub struct MachineConfigUpdate {
     /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_dirty_pages: Option<bool>,
+    /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backed_by_hugepages: Option<bool>,
 }
 
 impl MachineConfigUpdate {
@@ -97,6 +103,7 @@ impl From<MachineConfig> for MachineConfigUpdate {
             smt: Some(cfg.smt),
             cpu_template: cfg.cpu_template,
             track_dirty_pages: Some(cfg.track_dirty_pages),
+            backed_by_hugepages: Some(cfg.backed_by_hugepages)
         }
     }
 }
@@ -114,6 +121,8 @@ pub struct VmConfig {
     pub cpu_template: Option<CpuTemplateType>,
     /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
     pub track_dirty_pages: bool,
+    /// Enables or disables dirty page tracking. Enabling allows incremental snapshots.
+    pub backed_by_hugepages: bool,
 }
 
 impl VmConfig {
@@ -165,6 +174,7 @@ impl VmConfig {
             smt,
             cpu_template,
             track_dirty_pages: update.track_dirty_pages.unwrap_or(self.track_dirty_pages),
+            backed_by_hugepages: update.backed_by_hugepages.unwrap_or(self.backed_by_hugepages),
         })
     }
 }
@@ -177,6 +187,7 @@ impl Default for VmConfig {
             smt: false,
             cpu_template: None,
             track_dirty_pages: false,
+            backed_by_hugepages: false,
         }
     }
 }
@@ -189,6 +200,7 @@ impl From<&VmConfig> for MachineConfig {
             smt: value.smt,
             cpu_template: value.cpu_template.as_ref().map(|template| template.into()),
             track_dirty_pages: value.track_dirty_pages,
+            backed_by_hugepages: value.backed_by_hugepages,
         }
     }
 }

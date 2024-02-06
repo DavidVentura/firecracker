@@ -384,6 +384,7 @@ pub fn restore_from_snapshot(
 ) -> Result<Arc<Mutex<Vmm>>, RestoreFromSnapshotError> {
     let microvm_state = snapshot_state_from_file(&params.snapshot_path)?;
     let track_dirty_pages = params.enable_diff_snapshots;
+    let backed_by_hugepages = false; // FIXME params.enable_diff_snapshots;
 
     let vcpu_count = microvm_state
         .vcpu_states
@@ -399,6 +400,7 @@ pub fn restore_from_snapshot(
             smt: Some(microvm_state.vm_info.smt),
             cpu_template: Some(microvm_state.vm_info.cpu_template),
             track_dirty_pages: Some(track_dirty_pages),
+            backed_by_hugepages: Some(backed_by_hugepages),
         })
         .map_err(BuildMicrovmFromSnapshotError::VmUpdateConfig)?;
 
@@ -410,7 +412,7 @@ pub fn restore_from_snapshot(
 
     let (guest_memory, uffd) = match params.mem_backend.backend_type {
         MemBackendType::File => (
-            guest_memory_from_file(mem_backend_path, mem_state, track_dirty_pages)
+            guest_memory_from_file(mem_backend_path, mem_state, track_dirty_pages, backed_by_hugepages)
                 .map_err(RestoreFromSnapshotGuestMemoryError::File)?,
             None,
         ),
@@ -421,6 +423,7 @@ pub fn restore_from_snapshot(
             // We enable the UFFD_FEATURE_EVENT_REMOVE feature only if a balloon device
             // is present in the microVM state.
             microvm_state.device_states.balloon_device.is_some(),
+            backed_by_hugepages,
         )
         .map_err(RestoreFromSnapshotGuestMemoryError::Uffd)?,
     };
@@ -474,9 +477,10 @@ fn guest_memory_from_file(
     mem_file_path: &Path,
     mem_state: &GuestMemoryState,
     track_dirty_pages: bool,
+    backed_by_hugepages: bool,
 ) -> Result<GuestMemoryMmap, GuestMemoryFromFileError> {
     let mem_file = File::open(mem_file_path)?;
-    let guest_mem = GuestMemoryMmap::from_state(Some(&mem_file), mem_state, track_dirty_pages)?;
+    let guest_mem = GuestMemoryMmap::from_state(Some(&mem_file), mem_state, track_dirty_pages, backed_by_hugepages)?;
     Ok(guest_mem)
 }
 
@@ -500,8 +504,9 @@ fn guest_memory_from_uffd(
     mem_state: &GuestMemoryState,
     track_dirty_pages: bool,
     enable_balloon: bool,
+    backed_by_hugepages: bool,
 ) -> Result<(GuestMemoryMmap, Option<Uffd>), GuestMemoryFromUffdError> {
-    let guest_memory = GuestMemoryMmap::from_state(None, mem_state, track_dirty_pages)?;
+    let guest_memory = GuestMemoryMmap::from_state(None, mem_state, track_dirty_pages, backed_by_hugepages)?;
 
     let mut uffd_builder = UffdBuilder::new();
 

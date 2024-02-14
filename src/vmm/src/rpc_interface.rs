@@ -541,6 +541,7 @@ impl<'a> PrebootApiController<'a> {
             self.vm_resources,
             self.event_manager,
             self.seccomp_filters,
+            Box::new(std::io::stdout()),
         )
         .map(|vmm| {
             self.built_vmm = Some(vmm);

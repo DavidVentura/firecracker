@@ -131,6 +131,7 @@ fn create_vmm_and_vcpus(
     track_dirty_pages: bool,
     vcpu_count: u8,
     kvm_capabilities: Vec<KvmCapability>,
+    serial_output: Box<dyn SerialOut>,
 ) -> Result<(Vmm, Vec<Vcpu>), StartMicrovmError> {
     use self::StartMicrovmError::*;
 
@@ -164,12 +165,9 @@ fn create_vmm_and_vcpus(
         setup_interrupt_controller(&mut vm)?;
         let vcpus = create_vcpus(&vm, vcpu_count, &vcpus_exit_evt).map_err(Internal)?;
 
-        // Make stdout non blocking.
-        set_stdout_nonblocking();
-
         // Serial device setup.
         let serial_device =
-            setup_serial_device(event_manager, std::io::stdin(), io::stdout()).map_err(Internal)?;
+            setup_serial_device(event_manager, std::io::stdin(), serial_output).map_err(Internal)?;
 
         // x86_64 uses the i8042 reset event as the Vmm exit event.
         let reset_evt = vcpus_exit_evt
@@ -226,6 +224,7 @@ pub fn build_microvm_for_boot(
     vm_resources: &super::resources::VmResources,
     event_manager: &mut EventManager,
     seccomp_filters: &BpfThreadMap,
+    serial_output: Box<dyn SerialOut>,
 ) -> Result<Arc<Mutex<Vmm>>, StartMicrovmError> {
     use self::StartMicrovmError::*;
 
@@ -256,6 +255,7 @@ pub fn build_microvm_for_boot(
         track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
         cpu_template.kvm_capabilities.clone(),
+        serial_output,
     )?;
 
     // The boot timer device needs to be the first device attached in order
@@ -344,9 +344,10 @@ pub fn build_and_boot_microvm(
     vm_resources: &super::resources::VmResources,
     event_manager: &mut EventManager,
     seccomp_filters: &BpfThreadMap,
+    serial_output: Box<dyn SerialOut>,
 ) -> Result<Arc<Mutex<Vmm>>, StartMicrovmError> {
     debug!("event_start: build microvm for boot");
-    let vmm = build_microvm_for_boot(instance_info, vm_resources, event_manager, seccomp_filters)?;
+    let vmm = build_microvm_for_boot(instance_info, vm_resources, event_manager, seccomp_filters, serial_output)?;
     debug!("event_end: build microvm for boot");
     // The vcpus start off in the `Paused` state, let them run.
     debug!("event_start: boot microvm");
@@ -417,6 +418,7 @@ pub fn build_microvm_from_snapshot(
         vm_resources.vm_config.track_dirty_pages,
         vm_resources.vm_config.vcpu_count,
         microvm_state.vm_state.kvm_cap_modifiers.clone(),
+        Box::new(std::io::stdout()),
     )?;
 
     #[cfg(target_arch = "x86_64")]
@@ -614,7 +616,7 @@ pub fn setup_interrupt_controller(vm: &mut Vm, vcpu_count: u8) -> Result<(), Sta
 pub fn setup_serial_device(
     event_manager: &mut EventManager,
     input: std::io::Stdin,
-    out: std::io::Stdout,
+    out: Box<dyn SerialOut>,
 ) -> Result<Arc<Mutex<BusDevice>>, VmmError> {
     let interrupt_evt = EventFdTrigger::new(EventFd::new(EFD_NONBLOCK).map_err(VmmError::EventFd)?);
     let kick_stdin_read_evt =
@@ -625,7 +627,7 @@ pub fn setup_serial_device(
             SerialEventsWrapper {
                 buffer_ready_event_fd: Some(kick_stdin_read_evt),
             },
-            SerialOut::Stdout(out),
+            out,
         ),
         input: Some(input),
     })));
@@ -925,20 +927,6 @@ fn attach_balloon_device(
     attach_virtio_device(event_manager, vmm, id, balloon.clone(), cmdline, false)
 }
 
-// Adds `O_NONBLOCK` to the stdout flags.
-pub(crate) fn set_stdout_nonblocking() {
-    // SAFETY: Call is safe since parameters are valid.
-    let flags = unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_GETFL, 0) };
-    if flags < 0 {
-        error!("Could not get Firecracker stdout flags.");
-    }
-    // SAFETY: Call is safe since parameters are valid.
-    let rc = unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-    if rc < 0 {
-        error!("Could not set Firecracker stdout to non-blocking.");
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use std::io::Write;
@@ -1044,7 +1032,7 @@ pub mod tests {
                     SerialEventsWrapper {
                         buffer_ready_event_fd: None,
                     },
-                    SerialOut::Sink(std::io::sink()),
+                    Box::new(std::io::sink()),
                 ),
                 input: None,
             }))),
